@@ -46,7 +46,7 @@ RSS_FEEDS = [
 
 CUTOFF_HOURS = 18
 SIMILARITY_THRESHOLD = 0.72   # headlines closer than this are considered duplicates
-ANTHROPIC_MODEL = "claude-opus-4-6"
+ANTHROPIC_MODEL = "claude-sonnet-4-6"
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 
 SYSTEM_PROMPT = """You are a senior political editor briefing a journalist at The Scottish Brief on
@@ -208,7 +208,7 @@ def generate_briefing(articles: list[dict]) -> str:
     }
 
     log.info("Sending %d articles to Anthropic API (model: %s)", len(articles), ANTHROPIC_MODEL)
-    response = requests.post(ANTHROPIC_API_URL, headers=headers, json=payload, timeout=120)
+    response = requests.post(ANTHROPIC_API_URL, headers=headers, json=payload, timeout=90)
     response.raise_for_status()
 
     data = response.json()
