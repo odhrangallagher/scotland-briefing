@@ -362,13 +362,28 @@ def send_email(briefing_text: str, articles: list[dict]) -> None:
     html = briefing_to_html(briefing_text, articles, date_str)
     msg.attach(MIMEText(html, "html", "utf-8"))
 
-    log.info("Connecting to Gmail SMTP...")
-    with smtplib.SMTP("smtp.gmail.com", 587) as server:
-        server.ehlo()
-        server.starttls()
-        server.login(gmail_address, app_password)
-        server.sendmail(gmail_address, recipient, msg.as_string())
-    log.info("Email sent to %s", recipient)
+    # Try port 465 (SSL) first — port 587 (STARTTLS) is often blocked on Railway
+    smtp_timeout = 30
+    try:
+        log.info("Connecting to Gmail SMTP (port 465, SSL)...")
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=smtp_timeout) as server:
+            server.login(gmail_address, app_password)
+            server.sendmail(gmail_address, recipient, msg.as_string())
+        log.info("Email sent to %s", recipient)
+        return
+    except (smtplib.SMTPException, OSError) as exc:
+        log.warning("Port 465 failed (%s), falling back to port 587...", exc)
+
+    try:
+        log.info("Connecting to Gmail SMTP (port 587, STARTTLS)...")
+        with smtplib.SMTP("smtp.gmail.com", 587, timeout=smtp_timeout) as server:
+            server.ehlo()
+            server.starttls()
+            server.login(gmail_address, app_password)
+            server.sendmail(gmail_address, recipient, msg.as_string())
+        log.info("Email sent to %s", recipient)
+    except (smtplib.SMTPException, OSError, TimeoutError) as exc:
+        raise SystemExit(f"Failed to send email on both port 465 and 587: {exc}") from exc
 
 
 # ---------------------------------------------------------------------------
