@@ -1,18 +1,15 @@
 """
 Scotland Morning Briefing — daily Scottish politics email briefing.
 Run once and exits. Reads RSS feeds, generates AI briefing via Anthropic API,
-sends HTML email via Gmail SMTP.
+sends HTML email via SendGrid API.
 """
 
 import os
 import re
 import json
-import smtplib
 import hashlib
 import logging
 from datetime import datetime, timezone, timedelta
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
 from pathlib import Path
 from difflib import SequenceMatcher
 
@@ -340,50 +337,46 @@ def briefing_to_html(briefing_text: str, articles: list[dict], date_str: str) ->
 
 
 def send_email(briefing_text: str, articles: list[dict]) -> None:
-    gmail_address = os.environ["GMAIL_ADDRESS"]
-    app_password = os.environ["GMAIL_APP_PASSWORD"]
+    api_key = os.environ["SENDGRID_API_KEY"]
+    sender = os.environ["GMAIL_ADDRESS"]
     recipient = os.environ["RECIPIENT_EMAIL"]
 
     date_str = datetime.now().strftime("%A %d %B %Y")
     subject = f"Scotland Morning Briefing \u2014 {datetime.now().strftime('%d %B %Y')}"
 
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
-    msg["From"] = gmail_address
-    msg["To"] = recipient
-
-    # Plain text fallback
     plain = f"Scotland Morning Briefing — {date_str}\n\n{briefing_text}\n\nSource articles:\n"
     for a in articles:
         plain += f"  • {a['title']} ({a['source']})\n    {a['url']}\n"
-    msg.attach(MIMEText(plain, "plain", "utf-8"))
 
-    # HTML version
     html = briefing_to_html(briefing_text, articles, date_str)
-    msg.attach(MIMEText(html, "html", "utf-8"))
 
-    # Try port 465 (SSL) first — port 587 (STARTTLS) is often blocked on Railway
-    smtp_timeout = 30
-    try:
-        log.info("Connecting to Gmail SMTP (port 465, SSL)...")
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=smtp_timeout) as server:
-            server.login(gmail_address, app_password)
-            server.sendmail(gmail_address, recipient, msg.as_string())
-        log.info("Email sent to %s", recipient)
-        return
-    except (smtplib.SMTPException, OSError) as exc:
-        log.warning("Port 465 failed (%s), falling back to port 587...", exc)
+    payload = {
+        "personalizations": [{"to": [{"email": recipient}]}],
+        "from": {"email": sender},
+        "subject": subject,
+        "content": [
+            {"type": "text/plain", "value": plain},
+            {"type": "text/html", "value": html},
+        ],
+    }
 
-    try:
-        log.info("Connecting to Gmail SMTP (port 587, STARTTLS)...")
-        with smtplib.SMTP("smtp.gmail.com", 587, timeout=smtp_timeout) as server:
-            server.ehlo()
-            server.starttls()
-            server.login(gmail_address, app_password)
-            server.sendmail(gmail_address, recipient, msg.as_string())
+    log.info("Sending email via SendGrid API...")
+    response = requests.post(
+        "https://api.sendgrid.com/v3/mail/send",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        json=payload,
+        timeout=30,
+    )
+
+    if response.status_code == 202:
         log.info("Email sent to %s", recipient)
-    except (smtplib.SMTPException, OSError, TimeoutError) as exc:
-        raise SystemExit(f"Failed to send email on both port 465 and 587: {exc}") from exc
+    else:
+        raise SystemExit(
+            f"SendGrid API error {response.status_code}: {response.text}"
+        )
 
 
 # ---------------------------------------------------------------------------
